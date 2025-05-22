@@ -30,7 +30,10 @@
         "dark": "./assets/icon-dark.png",
         "light": "./assets/icon.png"
       },
-      "bundleIdentifier": "com.flemingvincent.ExpoSupabaseStarter"
+      "bundleIdentifier": "com.flemingvincent.ExpoSupabaseStarter",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -45,14 +48,21 @@
           "resizeMode": "cover",
           "image": "./assets/splash-dark.png"
         }
-      }
+      },
+      "permissions": ["android.permission.RECORD_AUDIO"]
     },
     "experiments": {
       "typedRoutes": true
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
+        }
+      ]
     ]
   }
 }

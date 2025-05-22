@@ -20,11 +20,10 @@ export default function WelcomeScreen() {
 	return (
 		<SafeAreaView className="flex flex-1 bg-background p-4">
 			<View className="flex flex-1 items-center justify-center gap-y-4 web:m-4">
-				<Image source={appIcon} className="w-16 h-16 rounded-xl" />
-				<H1 className="text-center">Welcome to Expo Supabase Starter</H1>
-				<Muted className="text-center">
-					A comprehensive starter project for developing React Native and Expo
-					applications with Supabase as the backend.
+				<Image source={appIcon} className="w-20 h-20 rounded-xl mb-2" />
+				<H1 className="text-center font-bold text-4xl">Welcome to Aretay</H1>
+				<Muted className="text-center text-lg px-4">
+					Your journey to <Text className="font-semibold text-foreground">seamless organization</Text> starts here.
 				</Muted>
 			</View>
 			<View className="flex flex-col gap-y-4 web:m-4">
