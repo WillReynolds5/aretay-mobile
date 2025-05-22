@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet } from "react-native";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { View, StyleSheet, Animated } from "react-native";
 import { supabase } from "@/config/supabase";
 
 import ReadingView from "./reading-view";
@@ -45,7 +45,7 @@ interface MultipleChoiceQuiz {
 
 interface CourseViewerProps {
   segment: Segment;
-  onNavigate: (direction: 'up' | 'down', autoPlay?: boolean) => void;
+  onNavigate: (direction: 'up' | 'down', options?: { autoPlayNextSegment?: boolean }) => void;
   isFirst: boolean;
   isLast: boolean;
   totalSegments: number;
@@ -95,6 +95,11 @@ export default function CourseViewer({
   const [subPageIndex, setSubPageIndex] = useState(0);
   const [totalSubPages, setTotalSubPages] = useState(1);
   
+  // Animation value
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const prevSegmentId = useRef<string | null>(null);
+  const prevIsShowingQuiz = useRef<boolean | null>(null);
+  
   // Quiz-related state
   const [quizzes, setQuizzes] = useState<MultipleChoiceQuiz[]>([]);
   const [isLoadingQuizzes, setIsLoadingQuizzes] = useState<boolean>(false);
@@ -104,6 +109,26 @@ export default function CourseViewer({
   const isShowingQuiz = subPageIndex >= totalSubPages && quizzes.length > 0;
   // Quiz index is the current index minus the content pages length
   const currentQuizIndex = isShowingQuiz ? subPageIndex - totalSubPages : 0;
+
+  // Trigger animation when content type changes or segment changes
+  useEffect(() => {
+    if (
+      (prevSegmentId.current !== segment.id) || 
+      (prevIsShowingQuiz.current !== isShowingQuiz)
+    ) {
+      // Reset position and animate in
+      slideAnim.setValue(50); // Start slightly below
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 8,
+        tension: 80
+      }).start();
+      
+      prevSegmentId.current = segment.id;
+      prevIsShowingQuiz.current = isShowingQuiz;
+    }
+  }, [segment.id, isShowingQuiz, slideAnim]);
 
   // Load quizzes when segment changes
   useEffect(() => {
@@ -177,7 +202,7 @@ export default function CourseViewer({
   }, [isShowingQuiz, onQuizVisibilityChange]);
 
   // Handle navigation within the segment (including quizzes)
-  const handleInternalNavigate = useCallback((direction: 'up' | 'down', autoPlay?: boolean) => {
+  const handleInternalNavigate = useCallback((direction: 'up' | 'down', options?: { autoPlayNextSegment?: boolean }) => {
     if (direction === 'up') {
       // Going forward
       if (isShowingQuiz) {
@@ -187,7 +212,7 @@ export default function CourseViewer({
           setSubPageIndex(prev => prev + 1);
         } else {
           // No more quizzes, go to next segment
-          onNavigate('up', false);
+          onNavigate('up', { autoPlayNextSegment: options?.autoPlayNextSegment ?? false });
         }
       } else {
         // In reading mode
@@ -199,7 +224,7 @@ export default function CourseViewer({
           setSubPageIndex(totalSubPages);
         } else {
           // No quizzes, go to next segment
-          onNavigate('up', false);
+          onNavigate('up', { autoPlayNextSegment: options?.autoPlayNextSegment ?? false });
         }
       }
     } else {
@@ -220,7 +245,7 @@ export default function CourseViewer({
           setSubPageIndex(prev => prev - 1);
         } else {
           // First content page, go to previous segment
-          onNavigate('down', false);
+          onNavigate('down', { autoPlayNextSegment: options?.autoPlayNextSegment ?? false });
         }
       }
     }
@@ -237,51 +262,58 @@ export default function CourseViewer({
 
   return (
     <View style={styles.container}>
-      {!isShowingQuiz ? (
-        <ReadingView
-          segment={segment}
-          onNavigate={handleInternalNavigate}
-          isFirst={isFirstPage}
-          isLast={isLastPage}
-          totalSegments={totalSegments}
-          currentIndex={currentIndex}
-          bookId={bookId}
-          getSignedUrl={getSignedUrl}
-          enableAudio={enableAudio}
-          enableHighlighting={enableHighlighting}
-          enableDarkMode={enableDarkMode}
-          onUpdateSetting={onUpdateSetting}
-          userId={userId}
-          generateNotes={generateNotes}
-          notesContent={notesContent}
-          showNotesPopup={showNotesPopup}
-          closeNotesPopup={closeNotesPopup}
-          isGeneratingNotes={isGeneratingNotes}
-          onSwitchToQuiz={() => setSubPageIndex(totalSubPages)}
-          onSubPageChanged={(newSubPageIndex: number, newTotalSubPages: number) => {
-            setSubPageIndex(newSubPageIndex);
-            setTotalSubPages(newTotalSubPages);
-          }}
-        />
-      ) : (
-        <QuizView
-          quizzes={quizzes}
-          onComplete={() => {
-            // Force a direct call to the parent navigation to ensure we move to the next section
-            onNavigate('up');
-          }}
-          onSubmit={handleQuizSubmit}
-          bookTitle={segment.title}
-          sectionNumber={currentIndex + 1}
-          totalSegments={totalSegments}
-          currentIndex={currentIndex}
-          onNavigate={handleInternalNavigate}
-          isFirst={isFirstPage}
-          isLast={isLastPage}
-          subPageIndex={currentQuizIndex}
-          totalSubPages={quizzes.length}
-        />
-      )}
+      <Animated.View 
+        style={[
+          styles.contentContainer,
+          { transform: [{ translateY: slideAnim }] }
+        ]}
+      >
+        {!isShowingQuiz ? (
+          <ReadingView
+            segment={segment}
+            onNavigate={handleInternalNavigate}
+            isFirst={isFirstPage}
+            isLast={isLastPage}
+            totalSegments={totalSegments}
+            currentIndex={currentIndex}
+            bookId={bookId}
+            getSignedUrl={getSignedUrl}
+            enableAudio={enableAudio}
+            enableHighlighting={enableHighlighting}
+            enableDarkMode={enableDarkMode}
+            onUpdateSetting={onUpdateSetting}
+            userId={userId}
+            generateNotes={generateNotes}
+            notesContent={notesContent}
+            showNotesPopup={showNotesPopup}
+            closeNotesPopup={closeNotesPopup}
+            isGeneratingNotes={isGeneratingNotes}
+            onSwitchToQuiz={() => setSubPageIndex(totalSubPages)}
+            onSubPageChanged={(newSubPageIndex: number, newTotalSubPages: number) => {
+              setSubPageIndex(newSubPageIndex);
+              setTotalSubPages(newTotalSubPages);
+            }}
+          />
+        ) : (
+          <QuizView
+            quizzes={quizzes}
+            onComplete={() => {
+              // Force a direct call to the parent navigation to ensure we move to the next section
+              onNavigate('up');
+            }}
+            onSubmit={handleQuizSubmit}
+            bookTitle={segment.title}
+            sectionNumber={currentIndex + 1}
+            totalSegments={totalSegments}
+            currentIndex={currentIndex}
+            onNavigate={handleInternalNavigate}
+            isFirst={isFirstPage}
+            isLast={isLastPage}
+            subPageIndex={currentQuizIndex}
+            totalSubPages={quizzes.length}
+          />
+        )}
+      </Animated.View>
     </View>
   );
 }
@@ -290,5 +322,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  contentContainer: {
+    flex: 1,
   }
 }); 

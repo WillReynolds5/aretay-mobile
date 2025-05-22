@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, useWindowDimensions, LayoutChangeEvent } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, useWindowDimensions, LayoutChangeEvent, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 
@@ -98,7 +98,7 @@ function createPageParts(
   console.log('Found sentences:', processedSentences.length);
   
   const pageParts: PagePart[] = [];
-  const SENTENCES_PER_PAGE = 3;
+  const SENTENCES_PER_PAGE = 1;
   
   // Group sentences into pages - 5 sentences per page
   for (let i = 0; i < processedSentences.length; i += SENTENCES_PER_PAGE) {
@@ -216,6 +216,9 @@ export default function ReadingView({
   // Create ref for audio player
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   
+  // Animation values
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  
   // Track page view
   const [hasTrackedPageView, setHasTrackedPageView] = useState(false);
   
@@ -226,6 +229,7 @@ export default function ReadingView({
   
   // Track last segment ID to detect actual changes
   const previousSegmentIdRef = useRef<string | null>(null);
+  const previousPartIndexRef = useRef<number>(0);
 
   // Initialize page parts when segment changes
   useEffect(() => {
@@ -291,6 +295,22 @@ export default function ReadingView({
     }
   }, [segment, onSubPageChanged]);
 
+  // Trigger animation when partIndex changes
+  useEffect(() => {
+    if (!isLoading && previousPartIndexRef.current !== partIndex) {
+      // Reset position and then animate in
+      slideAnim.setValue(50); // Start from slightly below (50 pixels)
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 8,
+        tension: 80
+      }).start();
+      
+      previousPartIndexRef.current = partIndex;
+    }
+  }, [partIndex, isLoading, slideAnim]);
+
   // Effect to handle autoPlay prop
   useEffect(() => {
     if (autoPlay && enableAudio && !isLoading && audioPlayerRef.current && pageParts.length > 0 && segment.audio_url) {
@@ -303,7 +323,7 @@ export default function ReadingView({
         } else {
           console.log('ReadingView: autoPlay skipped for part without audioStart or non-section slide.');
         }
-      }, 200); // Delay to allow AudioPlayer to initialize with new audioUrl/positions
+      }, 500); // 0.5 second delay before playing audio
       return () => clearTimeout(timer);
     }
   }, [autoPlay, segment.id, segment.audio_url, segment.slide_type, partIndex, pageParts, enableAudio, isLoading]);
@@ -356,7 +376,7 @@ export default function ReadingView({
           setTimeout(() => {
             console.log('ReadingView: Attempting to play next part (up)');
             audioPlayerRef.current?.play().catch(err => console.log('Error playing next part (up):', err));
-          }, 100);
+          }, 500); // 0.5 second delay before playing audio
         }
       } else {
         console.log('ReadingView: At last part, moving to next segment (up)');
@@ -375,7 +395,7 @@ export default function ReadingView({
            setTimeout(() => {
             console.log('ReadingView: Attempting to play previous part (down)');
             audioPlayerRef.current?.play().catch(err => console.log('Error playing previous part (down):', err));
-          }, 100);
+          }, 500); // 0.5 second delay before playing audio
         }
       } else {
         console.log('ReadingView: At first part, moving to previous segment (down)');
@@ -510,9 +530,14 @@ export default function ReadingView({
         </View>
       </View>
       
-      <View style={styles.contentArea}>
+      <Animated.View 
+        style={[
+          styles.contentArea, 
+          { transform: [{ translateY: slideAnim }] }
+        ]}
+      >
         {renderContent()}
-      </View>
+      </Animated.View>
       
       <View style={styles.navigationContainer}>
         {renderNavigationButtons()}

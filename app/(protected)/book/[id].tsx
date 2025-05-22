@@ -494,6 +494,13 @@ export default function BookPage() {
         options={{
           headerTitle: bookTitle,
           headerShown: true,
+          headerStyle: {
+            backgroundColor: "#000",
+          },
+          headerTitleStyle: {
+            color: "#fff",
+            fontSize: 16,
+          },
           headerLeft: () => (
             <Feather
               name="chevron-left"
