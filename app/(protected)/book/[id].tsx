@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { useLocalSearchParams, Stack, router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -365,17 +365,13 @@ export default function BookPage() {
     }
   };
 
-  // Signed URL getter
-  const getSignedUrl = async (storagePath: string) => {
-    if (!storagePath) {
-      console.log('[BookPage] getSignedUrl called with empty storage path');
-      return null;
-    }
+  // Signed URL getter - memoized with useCallback
+  const getSignedUrl = useCallback(async (storagePath: string) => {
+    if (!storagePath) return null;
     
     try {
       // Check if the URL is already a full URL
       if (storagePath.startsWith('http')) {
-        console.log(`[BookPage] Audio using direct URL: ${storagePath.substring(0, 30)}...`);
         return storagePath;
       }
       
@@ -384,37 +380,23 @@ export default function BookPage() {
       
       // Build the direct public URL
       const directPublicUrl = `${supabaseUrl}/storage/v1/object/public/audio/${storagePath}`;
-      console.log(`[BookPage] Generated signed URL for audio: ${directPublicUrl.substring(0, 30)}...`);
       return directPublicUrl;
     } catch (error) {
-      console.log("[BookPage] Error getting audio URL:", error);
+      console.log("Error getting audio URL:", error);
       return null;
     }
-  };
-
-  // Add a debug effect to track segments with missing audio
-  useEffect(() => {
-    if (segments.length > 0) {
-      const segmentsWithAudio = segments.filter(s => s.audio_url).length;
-      const segmentsWithAlignmentData = segments.filter(s => s.alignment_data).length;
-      
-      console.log(`[BookPage] Audio data summary:
-      - Total segments: ${segments.length}
-      - Segments with audio: ${segmentsWithAudio}
-      - Segments with alignment data: ${segmentsWithAlignmentData}
-      `);
-    }
-  }, [segments]);
+  }, []); // Empty dependency array as it doesn't rely on component state/props
 
   // Handle navigation within the segment (including quizzes)
-  const handleInternalNavigate = (direction: 'up' | 'down', autoPlay?: boolean) => {
+  const handleInternalNavigate = (direction: 'up' | 'down', options?: { autoPlayNextSegment?: boolean }) => {
     console.log('[BookPage] Internal navigation called:', { 
       direction, 
       subPageIndex, 
       totalSubPages,
       isShowingQuiz,
       currentQuizIndex,
-      quizzes: quizzes.length
+      quizzes: quizzes.length,
+      autoPlayNextSegment: options?.autoPlayNextSegment
     });
     
     if (direction === 'up') {
@@ -428,7 +410,7 @@ export default function BookPage() {
         } else {
           // No more quizzes, go to next segment
           console.log('[BookPage] No more quiz questions, moving to next segment');
-          handleNavigation('up', false);
+          handleNavigation('up', options?.autoPlayNextSegment ?? false);
         }
       } else {
         // In reading mode
@@ -446,7 +428,7 @@ export default function BookPage() {
         } else {
           // No quizzes, go to next segment
           console.log('[BookPage] No more content parts or quizzes, moving to next segment');
-          handleNavigation('up', false);
+          handleNavigation('up', options?.autoPlayNextSegment ?? false);
         }
       }
     } else {
@@ -474,7 +456,8 @@ export default function BookPage() {
         } else {
           // First content page, go to previous segment
           console.log('[BookPage] At first content part, moving to previous segment');
-          handleNavigation('down', false);
+          // Autoplay is typically false when going back to a previous segment
+          handleNavigation('down', false); 
         }
       }
     }
@@ -534,6 +517,7 @@ export default function BookPage() {
           bookId={bookId}
           getSignedUrl={getSignedUrl}
           enableAudio={enableAudio}
+          autoPlay={triggerAutoplayForCurrentSegment}
           enableHighlighting={enableHighlighting}
           enableDarkMode={enableDarkMode}
           onUpdateSetting={handleUpdateSetting}

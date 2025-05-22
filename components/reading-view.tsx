@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, useWindowDimensions, LayoutChangeEvent } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-import { supabase } from "@/config/supabase";
 
 import { H1, P, Muted } from "@/components/ui/typography";
 import AudioPlayer, { AudioPlayerRef } from "./audio-player";
@@ -40,7 +39,7 @@ interface PagePart {
 
 interface ReadingViewProps {
   segment: Segment;
-  onNavigate: (direction: 'up' | 'down', autoPlay?: boolean) => void;
+  onNavigate: (direction: 'up' | 'down', options?: { autoPlayNextSegment?: boolean }) => void;
   isFirst: boolean;
   isLast: boolean;
   totalSegments: number;
@@ -50,6 +49,7 @@ interface ReadingViewProps {
   enableAudio: boolean;
   enableHighlighting: boolean;
   enableDarkMode: boolean;
+  autoPlay?: boolean; // Added for triggering autoplay for the current segment
   onUpdateSetting: (
     settingName: 'enable_audio' | 'enable_highlighting' | 'enable_dark_mode',
     value: boolean
@@ -98,7 +98,7 @@ function createPageParts(
   console.log('Found sentences:', processedSentences.length);
   
   const pageParts: PagePart[] = [];
-  const SENTENCES_PER_PAGE = 1;
+  const SENTENCES_PER_PAGE = 3;
   
   // Group sentences into pages - 5 sentences per page
   for (let i = 0; i < processedSentences.length; i += SENTENCES_PER_PAGE) {
@@ -130,6 +130,9 @@ function createPageParts(
   // Debug log the first few chars of each part
   pageParts.forEach((part, idx) => {
     console.log(`Part ${idx+1}: ${part.text.substring(0, 20)}... (${part.text.length} chars)`);
+    if (part.audioStart === null || part.audioEnd === null) {
+      console.warn(`  WARN: Part ${idx+1} has null audio timing. Start: ${part.audioStart}, End: ${part.audioEnd}`);
+    }
   });
   
   return pageParts;
@@ -141,7 +144,6 @@ function findAudioTimingForText(
   alignmentData?: Segment['alignment_data']
 ): { start: number; end: number } | null {
   if (!alignmentData || !alignmentData.segments || alignmentData.segments.length === 0) {
-    console.log('No alignment data available for text:', text.substring(0, 20) + '...');
     return null;
   }
   
@@ -179,15 +181,12 @@ function findAudioTimingForText(
   
   // If we couldn't match specific text, use the first and last segments
   if (alignmentData.segments.length > 0) {
-    const result = {
+    return {
       start: alignmentData.segments[0].start,
       end: alignmentData.segments[alignmentData.segments.length - 1].end
     };
-    console.log('Using fallback timing for text:', text.substring(0, 20) + '...', result);
-    return result;
   }
   
-  console.log('Unable to find audio timing for text:', text.substring(0, 20) + '...');
   return null;
 }
 
@@ -203,6 +202,7 @@ export default function ReadingView({
   enableAudio,
   enableHighlighting,
   enableDarkMode,
+  autoPlay,
   onUpdateSetting,
   userId = null,
   generateNotes,
@@ -231,10 +231,13 @@ export default function ReadingView({
   useEffect(() => {
     if (!segment) return;
     
-    // Pause any playing audio when segment changes
-    audioPlayerRef.current?.pause().catch(err => console.log('Error pausing audio:', err));
+    // Pause any playing audio when segment changes explicitly (not from autoPlay of new segment)
+    // This ensures audio from a *previous* segment stops.
+    // The autoPlay useEffect will handle starting audio for the *new* segment if needed.
+    if (previousSegmentIdRef.current && previousSegmentIdRef.current !== segment.id) {
+      audioPlayerRef.current?.pause().catch(err => console.log('ReadingView: Error pausing audio on segment change:', err));
+    }
     
-    // Check if this is actually a different segment (not just a re-render)
     const segmentChanged = previousSegmentIdRef.current !== segment.id;
     console.log('Segment change check:', { 
       current: segment.id, 
@@ -286,7 +289,24 @@ export default function ReadingView({
     if (segmentChanged || parts.length !== pageParts.length) {
       onSubPageChanged?.(segmentChanged ? 0 : partIndex, parts.length);
     }
-  }, [segment, onSubPageChanged, pageParts.length, partIndex]);
+  }, [segment, onSubPageChanged]);
+
+  // Effect to handle autoPlay prop
+  useEffect(() => {
+    if (autoPlay && enableAudio && !isLoading && audioPlayerRef.current && pageParts.length > 0 && segment.audio_url) {
+      console.log(`ReadingView: autoPlay prop is true for segment ${segment.id}, part ${partIndex}. Attempting to play.`);
+      const timer = setTimeout(() => {
+        const currentPart = pageParts[partIndex];
+        // Ensure current part has audio timing if it's a text slide, or allow play for section slides (which might have full audio)
+        if (segment.slide_type === 'section' || (currentPart && currentPart.audioStart !== null)) {
+          audioPlayerRef.current?.play().catch(err => console.log('ReadingView: Error auto-playing audio:', err));
+        } else {
+          console.log('ReadingView: autoPlay skipped for part without audioStart or non-section slide.');
+        }
+      }, 200); // Delay to allow AudioPlayer to initialize with new audioUrl/positions
+      return () => clearTimeout(timer);
+    }
+  }, [autoPlay, segment.id, segment.audio_url, segment.slide_type, partIndex, pageParts, enableAudio, isLoading]);
 
   // Track page view
   useEffect(() => {
@@ -304,71 +324,66 @@ export default function ReadingView({
     trackPageView();
   }, [segment.id, bookId, userId, hasTrackedPageView]);
 
-  // Debug logs for audio timing issues
-  useEffect(() => {
-    if (pageParts.length > 0) {
-      // Log pages with missing audio timing
-      const missingTimingCount = pageParts.filter(part => 
-        part.audioStart === null || part.audioEnd === null
-      ).length;
-      
-      if (missingTimingCount > 0) {
-        console.log(`[ReadingView] Warning: ${missingTimingCount}/${pageParts.length} page parts have missing audio timing.`);
-      }
-    }
-  }, [pageParts]);
-
   // Simple navigation handler
-  const handleNavigation = useCallback((direction: 'up' | 'down') => {
-    // Pause audio player if it's currently playing and loaded
-    if (audioPlayerRef.current?.isLoaded() && audioPlayerRef.current?.isPlaying()) {
-      audioPlayerRef.current?.pause().catch(err => console.log('Error pausing audio:', err));
+  const handleNavigation = useCallback((direction: 'up' | 'down', navOptions?: { keepAudioPlaying?: boolean }) => {
+    const shouldPauseAudio = !(navOptions?.keepAudioPlaying && enableAudio);
+
+    if (shouldPauseAudio) {
+      audioPlayerRef.current?.pause().catch(err => console.log('ReadingView: Error pausing audio on manual navigation:', err));
     }
     
-    // Debug logs
-    console.log('ReadingView: Manual navigation triggered:', { 
+    console.log('ReadingView: Navigation triggered:', { 
       direction, 
       currentPartIndex: partIndex, 
       totalParts: pageParts.length,
       isFirst,
-      isLast
+      isLast,
+      keepAudioPlaying: navOptions?.keepAudioPlaying,
+      shouldPauseAudio
     });
     
-    // Calculate new index directly
     let newIndex = partIndex;
     
     if (direction === 'up') {
-      // Going forward
       if (partIndex < pageParts.length - 1) {
-        // More parts in this segment
         newIndex = partIndex + 1;
         console.log('ReadingView: Moving to next part:', newIndex);
-        
-        // Update state
         setPartIndex(newIndex);
         onSubPageChanged?.(newIndex, pageParts.length);
+        if (navOptions?.keepAudioPlaying && enableAudio && segment.audio_url) {
+          // AudioPlayer props (start/end pos) will update. Tell it to play.
+          // Small delay for prop propagation and for AudioPlayer to pick up new startPosition.
+          setTimeout(() => {
+            console.log('ReadingView: Attempting to play next part (up)');
+            audioPlayerRef.current?.play().catch(err => console.log('Error playing next part (up):', err));
+          }, 100);
+        }
       } else {
-        // End of this segment, move to next segment
-        console.log('ReadingView: At last part, moving to next segment');
-        onNavigate('up', false);
+        console.log('ReadingView: At last part, moving to next segment (up)');
+        onNavigate('up', { autoPlayNextSegment: navOptions?.keepAudioPlaying ?? false });
       }
-    } else {
-      // Going backward
+    } else { // direction 'down'
       if (partIndex > 0) {
-        // Not at first part of segment
         newIndex = partIndex - 1;
         console.log('ReadingView: Moving to previous part:', newIndex);
-        
-        // Update state
         setPartIndex(newIndex);
         onSubPageChanged?.(newIndex, pageParts.length);
+        // Typically, navigating 'down' (back) manually wouldn't auto-play the previous part,
+        // but if keepAudioPlaying was true (e.g. hypothetical programmatic 'rewind and play'), it could.
+        // For now, manual 'down' will have keepAudioPlaying: false from UI.
+        if (navOptions?.keepAudioPlaying && enableAudio && segment.audio_url) {
+           setTimeout(() => {
+            console.log('ReadingView: Attempting to play previous part (down)');
+            audioPlayerRef.current?.play().catch(err => console.log('Error playing previous part (down):', err));
+          }, 100);
+        }
       } else {
-        // At first part, move to previous segment
-        console.log('ReadingView: At first part, moving to previous segment');
-        onNavigate('down', false);
+        console.log('ReadingView: At first part, moving to previous segment (down)');
+        // autoPlayNextSegment for 'down' (previous segment) is typically false.
+        onNavigate('down', { autoPlayNextSegment: navOptions?.keepAudioPlaying ?? false });
       }
     }
-  }, [partIndex, pageParts.length, isFirst, isLast, onNavigate, onSubPageChanged]);
+  }, [partIndex, pageParts.length, isFirst, isLast, onNavigate, onSubPageChanged, audioPlayerRef, enableAudio, segment.audio_url]);
 
   // Get current page part
   const getCurrentPart = (): PagePart => {
@@ -471,16 +486,18 @@ export default function ReadingView({
 
   // Effect to pause audio when part index changes
   useEffect(() => {
-    if (audioPlayerRef.current?.isLoaded()) {
-      // Only attempt to pause if audio is loaded
-      audioPlayerRef.current?.pause().catch(err => console.log('Error pausing audio:', err));
-    }
+    // This effect is largely superseded by the more nuanced pausing in handleNavigation
+    // and the segment change useEffect.
+    // Keeping it commented out for now unless specific scenarios require it.
+    // if (!navOptions?.keepAudioPlaying) { // This condition isn't available here
+    //   audioPlayerRef.current?.pause().catch(err => console.log('Error pausing audio on partIndex change:', err));
+    // }
   }, [partIndex]);
 
   // Add a handler for auto-navigation when audio finishes a page part
   const handleAudioFinish = useCallback(() => {
-    console.log('Audio finished for current page part, auto-navigating to next part');
-    handleNavigation('up');
+    console.log('ReadingView: Audio finished for current page part, auto-navigating to next part with keepAudioPlaying=true');
+    handleNavigation('up', { keepAudioPlaying: true });
   }, [handleNavigation]);
 
   return (

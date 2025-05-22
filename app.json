@@ -32,7 +32,9 @@
       },
       "bundleIdentifier": "com.flemingvincent.ExpoSupabaseStarter",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -49,7 +51,9 @@
           "image": "./assets/splash-dark.png"
         }
       },
-      "permissions": ["android.permission.RECORD_AUDIO"]
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "experiments": {
       "typedRoutes": true
@@ -62,7 +66,8 @@
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
         }
-      ]
+      ],
+      "expo-audio"
     ]
   }
 }

@@ -147,13 +147,10 @@ export default function CourseViewer({
       }
     };
 
-    // Log whether segment has audio
-    console.log(`[CourseViewer] Segment ${segment.id} - Has audio: ${!!segment.audio_url}`);
-    
     loadQuizzes();
     // Reset subpage index when segment changes
     setSubPageIndex(0);
-  }, [segment.id, segment.slide_type, userId, segment.audio_url]);
+  }, [segment.id, segment.slide_type, userId]);
 
   // Handle quiz submission
   const handleQuizSubmit = useCallback(async (selectedAnswer: string, isCorrect: boolean, quizId: number) => {
